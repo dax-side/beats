@@ -148,8 +148,15 @@ func (l *ackLoop[T]) processACK(lst batchList[T], N int) {
 			entry.producer = nil
 		}
 	}
-	// Signal runLoop to delete the events
-	l.broker.deleteChan <- N
+	// Signal runLoop to delete the events. If the queue is closed while we
+	// get here, runLoop has stopped reading deleteChan, so give up instead of
+	// blocking forever. The broker closes the ackWait channels of the
+	// remaining producers on shutdown, so no ACK callbacks are run after that.
+	select {
+	case l.broker.deleteChan <- N:
+	case <-l.broker.ctx.Done():
+		return
+	}
 
 	// The events have been removed; notify their listeners.
 	for _, f := range ackCallbacks {
